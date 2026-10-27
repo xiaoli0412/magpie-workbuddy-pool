@@ -32,7 +32,8 @@
   "scripts": {
     "import": "bun tools/import.mjs",
     "verify": "bun tools/verify.mjs",
-    "test": "bun tools/test-import.mjs && bun tools/test-page.mjs && bun tools/test-assets.mjs && bun tools/test-dom.mjs"
+    "test": "bun tools/test-import.mjs && bun tools/test-page.mjs && bun tools/test-assets.mjs && bun tools/test-dom.mjs",
+    "test:integration": "bun tools/test-roundtrip.mjs"
   },
   "magpie": {
     "page": {
