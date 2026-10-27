@@ -77,7 +77,7 @@ POST /v2/billing/meter/get-user-resource   （唯一暴露地理字段的接口�
 
 ```bash
 # 从 GitHub（本仓库即插件）
-magpie plugin add github:<owner>/magpie-workbuddy-pool
+magpie plugin add github:xiaoli0412/magpie-workbuddy-pool
 
 # 或本地目录
 magpie plugin add D:\path\to\magpie-workbuddy-pool
@@ -97,6 +97,8 @@ magpie plugin add npm:magpie-workbuddy-growth-core
 打开页面 → 展开「导入账号」→ 粘贴导出 JSON，或选择文件（可多选）→ **导入到喜鹊**。
 
 页面把这次导入写进本插件的 options（页面唯一被允许的写通道），插件在下次加载时应用、清空滞留项、刷新快照，页面自动重载显示结果。全程不需要 AI 介入，也不需要命令行。
+
+> 首次打开页面若显示「还没有导入账号」，是因为快照 page/data.js 由插件生成、不进仓库；插件下次加载（打开 magpie 即会）就会写入。
 
 > 页面运行在沙盒 iframe（`connect-src 'none'`，无网络、无文件系统），所以数据来自插件生成的 `page/data.js`——**只有元数据，不含任何令牌**。
 
@@ -196,7 +198,7 @@ bun run test
 
 ```bash
 copy %USERPROFILE%\.config\magpie\plugin-auth.json.pool.bak  %USERPROFILE%\.config\magpie\plugin-auth.json
-magpie plugin rm github:<owner>/magpie-workbuddy-pool
+magpie plugin rm github:xiaoli0412/magpie-workbuddy-pool
 ```
 
 ## 许可

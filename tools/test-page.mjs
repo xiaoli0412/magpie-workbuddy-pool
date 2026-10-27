@@ -1,13 +1,23 @@
 // Checks the page's own logic without a browser: the snapshot parses, the
 // grouping puts each account in its region, the health folds correctly, and
 // the tiles agree.
-import { readFileSync } from 'node:fs';
+//
+// page/data.js is generated (the plugin writes it from the local store, and it
+// is not in git), so a fresh clone has none to check. That is not a failure:
+// the page says so itself and the plugin rewrites it on its next load.
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PAGE = join(dirname(fileURLToPath(import.meta.url)), '..', 'page');
+const DATA = join(PAGE, 'data.js');
 
-new Function(readFileSync(join(PAGE, 'data.js'), 'utf8'))();
+if (!existsSync(DATA)) {
+  console.log('SKIP  no page/data.js yet (the plugin writes it from the local store)');
+  process.exit(0);
+}
+
+new Function(readFileSync(DATA, 'utf8'))();
 new Function(readFileSync(join(PAGE, 'view.js'), 'utf8'))();
 
 const snap = globalThis.WB_POOL;

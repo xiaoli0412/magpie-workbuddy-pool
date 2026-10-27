@@ -15,8 +15,10 @@ const html = readFileSync(join(PAGE, 'index.html'), 'utf8');
 
 // 1. the files the page names
 const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
+// the snapshot is generated, so its absence in a fresh clone is expected
 for (const ref of refs) {
   if (ref.startsWith('_magpie/')) continue; // served by magpie itself
+  if (ref === 'data.js') continue; // written by the plugin on load
   ok(existsSync(join(PAGE, ref)), `index.html names a missing file: ${ref}`);
 }
 ok(refs.includes('_magpie/bridge.js'), 'the page loads magpie\'s bridge');
@@ -24,10 +26,16 @@ ok(refs.includes('data.js'), 'the page loads the generated snapshot');
 ok(refs.includes('view.js') && refs.includes('app.js'), 'the page loads its own logic');
 ok(refs.indexOf('data.js') < refs.indexOf('app.js'), 'data.js loads before app.js');
 
-// 2. scripts parse (nothing runs)
+// 2. scripts parse (nothing runs) — the generated snapshot may not be there yet
 for (const f of ['data.js', 'view.js', 'app.js']) {
+  const file = join(PAGE, f);
+  if (!existsSync(file)) {
+    if (f === 'data.js') continue;
+    fail.push(`${f} is missing`);
+    continue;
+  }
   try {
-    new Function(readFileSync(join(PAGE, f), 'utf8'));
+    new Function(readFileSync(file, 'utf8'));
   } catch (e) {
     fail.push(`${f} does not parse: ${e.message}`);
   }
