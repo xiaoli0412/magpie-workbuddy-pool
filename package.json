@@ -1,0 +1,54 @@
+{
+  "name": "magpie-workbuddy-pool",
+  "version": "1.0.0",
+  "description": "WorkBuddy / CodeBuddy 账号池导入与区域管理：把导出的账号 JSON 一次性写成 magpie 原生 workbuddy / workbuddy-ai 登录态，按大陆 / 港澳台 / 国际分区，带健康检测、自动续期与页面内直接导入，并与成长计划积分插件共用同一份登录态。",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": "./index.mjs",
+  "files": [
+    "index.mjs",
+    "lib",
+    "page",
+    "tools",
+    "README.md"
+  ],
+  "keywords": [
+    "magpie",
+    "magpie-plugin",
+    "magpie-page",
+    "opencode",
+    "opencode-plugin",
+    "workbuddy",
+    "codebuddy",
+    "account-pool",
+    "账号池",
+    "成长计划",
+    "积分"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "import": "bun tools/import.mjs",
+    "verify": "bun tools/verify.mjs",
+    "test": "bun tools/test-import.mjs && bun tools/test-page.mjs && bun tools/test-assets.mjs"
+  },
+  "magpie": {
+    "page": {
+      "title": "WorkBuddy 账号池",
+      "titles": {
+        "zh": "WorkBuddy 账号池",
+        "zh-TW": "WorkBuddy 帳號池",
+        "en": "WorkBuddy pool"
+      },
+      "file": "page/index.html",
+      "icon": "page/icon.svg"
+    },
+    "permissions": [],
+    "options": {
+      "view": "compact",
+      "region": "all"
+    }
+  }
+}

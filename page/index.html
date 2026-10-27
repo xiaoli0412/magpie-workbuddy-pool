@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorkBuddy 账号池</title>
+<link rel="stylesheet" href="style.css">
+<script src="_magpie/bridge.js"></script>
+<script src="data.js"></script>
+<script src="view.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="title">WorkBuddy 账号池</h1>
+    <p class="since" id="since"></p>
+  </div>
+  <div class="seg" role="tablist" id="views" aria-label="视图">
+    <button type="button" role="tab" data-view="compact">缩略</button>
+    <button type="button" role="tab" data-view="detail">详细</button>
+  </div>
+</header>
+
+<section class="tiles" id="tiles" aria-label="概况"></section>
+
+<details class="panel" id="importPanel">
+  <summary>
+    <span class="dot plus"></span>
+    <span id="importTitle">导入账号</span>
+    <span class="hint" id="importHint">粘贴导出 JSON，或选择文件</span>
+  </summary>
+  <div class="panel-body">
+    <div class="row-inline">
+      <input type="file" id="file" accept=".json,application/json" multiple>
+      <span class="grow"></span>
+      <button type="button" class="primary" id="importBtn">导入到喜鹊</button>
+    </div>
+    <textarea id="paste" spellcheck="false" placeholder='[{ "uid": "…", "access_token": "…", "refresh_token": "…", "auth_raw": { "domain": "www.codebuddy.cn" } }]'></textarea>
+    <p class="status" id="status" hidden></p>
+    <p class="note" id="importNote">导入写入 magpie 原生登录态，与成长计划插件共用同一份；只保留账号元数据，令牌不进入页面。</p>
+  </div>
+</details>
+
+<div class="toolbar">
+  <input type="search" id="search" placeholder="搜索号码 / uid / 来源文件" autocomplete="off" spellcheck="false">
+  <div class="seg small" role="tablist" id="regions" aria-label="区域筛选">
+    <button type="button" role="tab" data-region="all">全部</button>
+    <button type="button" role="tab" data-region="cn">大陆</button>
+    <button type="button" role="tab" data-region="hmt">港澳台</button>
+    <button type="button" role="tab" data-region="intl">国际</button>
+    <button type="button" role="tab" data-region="unknown">未知</button>
+  </div>
+</div>
+
+<main id="groups"></main>
+<p class="empty" id="empty" hidden>没有符合条件的账号。</p>
+<p class="error" id="error" hidden></p>
+
+<footer><span id="footNote"></span></footer>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Never commit a real account.
+#
+# Everything in probe/ is a copy of an export that carries live tokens, and
+# page/data.js is generated from the local store, so both stay out.
+probe/
+page/data.js
+*.pool.bak
+*.pool.tmp
+*.bak
+node_modules/
+.DS_Store
+Thumbs.db
