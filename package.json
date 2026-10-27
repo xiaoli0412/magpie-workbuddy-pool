@@ -1,6 +1,6 @@
 {
   "name": "magpie-workbuddy-pool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "WorkBuddy / CodeBuddy 账号池导入与区域管理：把导出的账号 JSON 一次性写成 magpie 原生 workbuddy / workbuddy-ai 登录态，按大陆 / 港澳台 / 国际分区，带健康检测、自动续期与页面内直接导入，并与成长计划积分插件共用同一份登录态。",
   "type": "module",
   "main": "index.mjs",

@@ -19,15 +19,10 @@ const text = `[${readFileSync(poolFile, 'utf8').replace(/^\s*\[|\]\s*$/g, '')},$
 // 2. stage it the way the page does (POST /api/plugin-pages/options)
 const backup = join(CONFIG_DIR, 'plugins.json.pool-test.bak');
 copyFileSync(PLUGINS_FILE, backup);
-const plugins = JSON.parse(readFileSync(PLUGINS_FILE, 'utf8'));
-const entry = plugins.plugins.find((p) => {
-  try {
-    return JSON.parse(readFileSync(join(p.spec, 'package.json'), 'utf8')).name === 'magpie-workbuddy-pool';
-  } catch {
-    return false;
-  }
-});
-ok(entry, 'the plugin is registered in plugins.json');
+const found = entryOf();
+ok(found.index >= 0, 'the plugin is registered in plugins.json');
+const plugins = found.data;
+const entry = plugins.plugins[found.index];
 entry.options = { ...(entry.options || {}), pendingImport: { name: 'page-test.json', text, at: Date.now() } };
 writeFileSync(PLUGINS_FILE, JSON.stringify(plugins, null, 2), 'utf8');
 
