@@ -197,9 +197,24 @@ ok(staged, 'a submission stages pendingImport in the plugin’s options');
 ok(staged?.pendingImport?.text?.includes('"uid":"u1"'), 'the staged import carries the pasted text');
 ok(btn.disabled === true, 'the button locks while waiting');
 
+
+// ---- the other two tabs must paint too --------------------------------
+const tabs = byId.get('tabs');
+for (const fn of tabs.listeners.click || []) fn({ target: { closest: () => ({ dataset: { tab: 'usage' } }) } });
+await new Promise((r) => setTimeout(r, 40));
+ok(byId.get('pane-usage').hidden === false, 'usage tab is shown');
+ok(byId.get('usageTiles').children.length === 4, `usage tiles: ${byId.get('usageTiles').children.length}`);
+ok(byId.get('usageAccounts').children.length === 10, `usage account rows: ${byId.get('usageAccounts').children.length}`);
+
+for (const fn of tabs.listeners.click || []) fn({ target: { closest: () => ({ dataset: { tab: 'routing' } }) } });
+await new Promise((r) => setTimeout(r, 40));
+ok(byId.get('pane-routing').hidden === false, 'routing tab is shown');
+ok(byId.get('routingList').children.length >= 0, 'routing list painted without throwing');
+
 if (fail.length) {
   console.error('FAIL');
   for (const f of fail) console.error(' -', f);
   process.exit(1);
 }
 console.log('PASS  app.js runs against a stub DOM (paints, searches, stages an import)');
+

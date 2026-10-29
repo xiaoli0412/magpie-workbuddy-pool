@@ -204,3 +204,48 @@ magpie plugin rm github:xiaoli0412/magpie-workbuddy-pool
 ## 许可
 
 MIT
+
+---
+
+## v2.0：实测、用量、分流
+
+### 1. 「可用」是真发一次请求
+
+旧版只问 `GET /v2/plugin/accounts`（token 是否被接受）。这不等于模型能用。
+
+`lib/health.mjs` 改成**模型级**探测：
+
+1. `GET /v3/config?agent=cli` 取该账号可用模型，优先挑 `free` / `flash` / `mini` / `auto`（省钱）；
+2. 真发一条 `POST /v2/chat/completions`，`stream: true`、`max_tokens: 1`、内容就一个 `ping`；
+3. **收到第一个 SSE 分块就立刻断开**，不等完整回复；
+4. 解析上游错误码给人话：`10085` UA 被拒 / `11128` 提示词被判定非批准渠道 / `11140` 账号被限制 / `11158` 无权用此模型 / `12153` refresh token 已被消费 …
+
+实测（10 个账号）：
+
+```
+CN-181****2421  ok=true model=deepseek-v4-flash 1365ms
+CN-156****7796  ok=true model=deepseek-v4-flash 1278ms
+CN-196****9217  ok=true model=deepseek-v4-flash 1611ms
+… 10/10 answered
+```
+
+结果写进 `state.json`（`health` / `healthModel` / `healthMs` / `checkedAt`），界面显示「可用 / 失效 / 登录态缺失」和**用的哪个模型、多快**。
+
+### 2. 用量：读 magpie 自己的账
+
+`lib/usage.mjs` 直接读 `~/.config/magpie/usage.jsonl`，按 `providerAccount`（就是账号名）聚合：请求数、输入/输出 token、缓存读取、错误数、最近活跃、每个账号的主力模型。**不二次记账**，所以页面数字不会和 magpie 的「用量」页打架。
+
+### 3. 分流：哪个模型由谁扛
+
+同一个文件按 `model` 聚合出「模型 → 账号」分布，界面用占比条显示。这就是账号分流/模型分流的真实分布，不是配置推测。
+
+### 4. 启动不再拖慢 magpie
+
+magpie 会 `await` 每个插件的函数才服务请求。v2 把它拆开：
+
+| 阶段 | 内容 | 耗时 |
+|---|---|---|
+| 同步返回前 | 消费页面导入（文件写）、写 `page/data.js`（本地读） | ~9ms |
+| 之后（后台） | 模型级实测、token 续期 | 不阻塞 |
+
+实测 `plugin init` 从「联网探测 10 个账号」变成 **9ms**。

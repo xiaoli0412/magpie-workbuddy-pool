@@ -1,9 +1,8 @@
-// The page: paints the snapshot the pool wrote for it, and takes an import.
+// The page: paints what the plugin wrote into data.js, and takes an import.
 //
-// It has no network and asks magpie for no data (package.json declares no
-// permissions). Everything shown comes from data.js. An import is handed to
-// magpie through the one thing a page may write — its plugin's own options —
-// and this page then waits for the plugin to take it and reloads itself.
+// No network, no permissions: everything on screen comes from the snapshot. An
+// import is handed to magpie through the one thing a page may write — its
+// plugin's own options — and the page then waits for the plugin to take it.
 (async () => {
   const V = globalThis.WBPoolView;
   const snap = globalThis.WB_POOL || null;
@@ -24,6 +23,7 @@
   } catch {}
 
   const state = {
+    tab: ['accounts', 'usage', 'routing'].includes(opts.tab) ? opts.tab : 'accounts',
     view: opts.view === 'detail' ? 'detail' : 'compact',
     region: ['all', 'cn', 'hmt', 'intl', 'unknown'].includes(opts.region) ? opts.region : 'all',
     query: '',
@@ -31,6 +31,12 @@
   };
 
   const t = () => V.text(lang);
+  const el = (tag, cls, textContent) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (textContent !== undefined) n.textContent = textContent;
+    return n;
+  };
 
   function words() {
     $('title').textContent = t().title;
@@ -41,88 +47,65 @@
   }
 
   function seg(groupId, attr, value) {
-    $(groupId).querySelectorAll('button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset[attr] === value)));
+    const box = $(groupId);
+    if (!box) return;
+    box.querySelectorAll('button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset[attr] === value)));
   }
 
+  function tileRow(nodes) {
+    return nodes.map((tile) => {
+      const d = el('div', 'tile' + (tile.bad ? ' bad' : ''));
+      d.append(el('div', 'k', tile.label), el('div', 'v', tile.value), el('div', 's', tile.sub || ''));
+      return d;
+    });
+  }
+
+  // ---- accounts -----------------------------------------------------------
   function paintTiles() {
     if (!snap) return;
-    $('tiles').replaceChildren(
-      ...V.tiles(snap, lang).map((tile) => {
-        const d = document.createElement('div');
-        d.className = 'tile' + (tile.bad ? ' bad' : '');
-        const k = document.createElement('div');
-        k.className = 'k';
-        k.textContent = tile.label;
-        const v = document.createElement('div');
-        v.className = 'v';
-        v.textContent = tile.value;
-        const s = document.createElement('div');
-        s.className = 's';
-        s.textContent = tile.sub || '';
-        d.append(k, v, s);
-        return d;
-      }),
-    );
+    $('tiles').replaceChildren(...tileRow(V.tiles(snap, lang)));
   }
 
   function rowOf(a, detailed) {
     const level = V.levelOf(a);
-    const li = document.createElement('li');
-    li.className = 'row' + (detailed ? ' detail' : '');
+    const li = el('li', 'row' + (detailed ? ' detail' : ''));
 
-    const dot = document.createElement('span');
-    dot.className = `dot ${a.region}`;
+    const dot = el('span', `dot ${a.region}`);
+    const who = el('div', 'who');
 
-    const who = document.createElement('div');
-    who.className = 'who';
-
-    const label = document.createElement('div');
-    label.className = 'label';
+    const label = el('div', 'label');
     label.append(document.createTextNode(a.label || a.uid));
-    if (a.enterprise) {
-      const b = document.createElement('span');
-      b.className = 'badge';
-      b.textContent = '企业';
-      label.append(b);
-    }
-    const st = document.createElement('span');
-    st.className = `badge st-${level}`;
-    st.textContent = V.healthText(level, lang);
-    label.append(st);
+    if (a.enterprise) label.append(el('span', 'badge', '企业'));
+    label.append(el('span', `badge st-${level}`, V.healthText(level, lang)));
 
-    const sub = document.createElement('div');
-    sub.className = 'sub';
+    const sub = el('div', 'sub');
+    const reqs = a.use?.requests ? ` · ${a.use.requests} 次请求` : '';
     sub.textContent = detailed
-      ? `${V.providerName(a.provider)} · ${a.domain || '—'} · ${a.phone || ''}`
-      : `${V.providerName(a.provider)} · ${a.phone || ''}`;
+      ? `${V.providerName(a.provider)} · ${a.domain || '—'} · ${a.phone || ''}${reqs}`
+      : `${V.providerName(a.provider)} · ${a.phone || ''}${reqs}`;
     who.append(label, sub);
 
-    const meta = document.createElement('div');
-    meta.className = 'meta' + (a.hoursLeft !== null && a.hoursLeft < 72 ? ' warn' : '');
-    meta.textContent = V.left(a.expiresAt);
+    const meta = el('div', 'meta' + (a.hoursLeft !== null && a.hoursLeft < 72 ? ' warn' : ''), V.left(a.expiresAt));
 
     li.append(dot, who, meta);
 
     if (detailed) {
-      const kv = document.createElement('div');
-      kv.className = 'kv';
+      const kv = el('div', 'kv');
       const notes = a.healthNote || a.lastError;
       const facts = [
         ['uid', a.uid],
         ['key', a.key],
-        ['domain', a.domain],
-        ['来源', a.sourceFile || '—'],
+        ['账号名', a.accountId],
         ['区域依据', `${a.origin || '—'} / ${a.domain || '—'}`],
-        ['检测', a.checkedAt ? V.when(new Date(a.checkedAt).toISOString()) : '未检测'],
-        ['续期', a.refreshedAt ? V.when(new Date(a.refreshedAt).toISOString()) : '—'],
+        ['实测模型', a.healthModel ? `${a.healthModel} · ${Math.round((a.healthMs || 0) / 100) / 10}s` : '—'],
+        ['检测时间', a.checkedAt ? V.when(new Date(a.checkedAt).toISOString()) : '未检测'],
+        ['用量', a.use?.requests ? `${a.use.requests} 请求 · 入 ${V.num(a.use.input)} · 出 ${V.num(a.use.output)}` : '无'],
         ['刷新剩余', a.refreshExpiresAt ? V.left(a.refreshExpiresAt) : '—'],
         ...(notes ? [['备注', notes]] : []),
       ];
       for (const [k, val] of facts) {
-        const d = document.createElement('div');
-        const b = document.createElement('b');
-        b.textContent = String(val ?? '—');
-        d.append(document.createTextNode(`${k} `), b);
+        const d = el('div');
+        d.append(document.createTextNode(`${k} `), el('b', '', String(val ?? '—')));
         kv.append(d);
       }
       li.append(kv);
@@ -146,19 +129,11 @@
 
     host.replaceChildren(
       ...groups.map((g) => {
-        const box = document.createElement('details');
-        box.className = 'group';
+        const box = el('details', 'group');
         box.open = !state.closed.has(g.region);
 
-        const summary = document.createElement('summary');
-        const dot = document.createElement('span');
-        dot.className = `dot ${g.region}`;
-        const name = document.createElement('span');
-        name.textContent = g.label;
-        const count = document.createElement('span');
-        count.className = 'count';
-        count.textContent = String(g.rows.length);
-        summary.append(dot, name, count);
+        const summary = el('summary');
+        summary.append(el('span', `dot ${g.region}`), el('span', '', g.label), el('span', 'count', String(g.rows.length)));
 
         box.addEventListener('toggle', () => {
           if (box.open) state.closed.delete(g.region);
@@ -166,8 +141,7 @@
           save();
         });
 
-        const ul = document.createElement('ul');
-        ul.className = 'rows';
+        const ul = el('ul', 'rows');
         ul.replaceChildren(...g.rows.map((a) => rowOf(a, state.view === 'detail')));
         box.append(summary, ul);
         return box;
@@ -175,31 +149,104 @@
     );
   }
 
-  let saving = null;
-  function save() {
-    if (saving) return;
-    saving = setTimeout(async () => {
-      saving = null;
-      try {
-        opts = (await magpie.options.set({ ...opts, view: state.view, region: state.region, closed: [...state.closed] })) || opts;
-      } catch {}
-    }, 1100);
+  // ---- usage --------------------------------------------------------------
+  function paintUsage() {
+    if (!snap) return;
+    $('usageTiles').replaceChildren(...tileRow(V.usageTiles(snap, lang)));
+
+    // trend
+    const bars = V.dayBars(snap);
+    $('dayBars').replaceChildren(
+      ...bars.map((d) => {
+        const col = el('div', 'bar');
+        col.title = `${d.date} · ${d.requests} 请求`;
+        const fill = el('i');
+        fill.style.height = `${d.height}%`;
+        col.append(fill, el('span', 'bl', d.date.slice(5)));
+        return col;
+      }),
+    );
+
+    // by account
+    const accounts = V.accountUsage(snap);
+    $('usageAccounts').replaceChildren(
+      ...accounts.map((a) => {
+        const li = el('li', 'trow');
+        const head = el('div', 'thead');
+        head.append(el('span', 'tname', a.label), el('span', 'tnum', `${a.requests} 请求 · 入 ${V.num(a.input)} · 出 ${V.num(a.output)}`));
+        li.append(head);
+
+        if (a.requests) {
+          const bar = el('span', 'tbar');
+          const fill = el('i');
+          const max = accounts[0]?.requests || 1;
+          fill.style.width = `${Math.max(2, Math.round((a.requests / max) * 100))}%`;
+          bar.append(fill);
+          li.append(bar);
+        }
+        const sub = el('div', 'tsub');
+        sub.textContent = [
+          a.top ? `主力 ${a.top}` : '无请求',
+          a.errors ? `${a.errors} 错误` : '',
+          a.lastAt ? `最近 ${V.when(new Date(a.lastAt).toISOString())}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        li.append(sub);
+        return li;
+      }),
+    );
+
+    // by model
+    const models = V.modelUsage(snap);
+    $('usageModels').replaceChildren(
+      ...models.map((m) => {
+        const li = el('li', 'trow');
+        const head = el('div', 'thead');
+        head.append(el('span', 'tname', m.model), el('span', 'tnum', `${m.requests} 请求 · ${Math.round(m.share * 100)}%`));
+        const bar = el('span', 'tbar');
+        const fill = el('i');
+        fill.style.width = `${Math.max(2, Math.round(m.share * 100))}%`;
+        bar.append(fill);
+        li.append(head, bar);
+        const who = m.accounts.map((x) => `${x.account}(${x.requests})`).join(' · ');
+        li.append(el('div', 'tsub', who));
+        return li;
+      }),
+    );
   }
 
-  function paint() {
-    seg('views', 'view', state.view);
-    seg('regions', 'region', state.region);
-    paintTiles();
-    paintGroups();
+  // ---- routing ------------------------------------------------------------
+  function paintRouting() {
+    if (!snap) return;
+    const rows = V.routingRows(snap);
+    $('routingEmpty').hidden = rows.length > 0;
+    $('routingList').replaceChildren(
+      ...rows.map((r) => {
+        const li = el('li', 'trow');
+        const head = el('div', 'thead');
+        head.append(el('span', 'tname', r.model), el('span', 'tnum', `${r.requests} 请求`));
+        li.append(head);
+        for (const a of r.accounts) {
+          const line = el('div', 'share');
+          line.append(el('span', 'shlab', a.account));
+          const bar = el('span', 'shbar');
+          const fill = el('i');
+          fill.style.width = `${Math.max(2, Math.round(a.share * 100))}%`;
+          bar.append(fill);
+          line.append(bar, el('span', 'shnum', `${Math.round(a.share * 100)}% · ${a.requests}`));
+          li.append(line);
+        }
+        return li;
+      }),
+    );
   }
 
   // ---- import -------------------------------------------------------------
-
   let picked = [];
   $('file').addEventListener('change', async (e) => {
     picked = [];
-    const files = [...(e.target.files || [])];
-    for (const f of files) {
+    for (const f of [...(e.target.files || [])]) {
       try {
         picked.push({ name: f.name, text: await f.text() });
       } catch {}
@@ -208,10 +255,10 @@
   });
 
   function setStatus(msg, bad) {
-    const el = $('status');
-    el.hidden = !msg;
-    el.textContent = msg || '';
-    el.classList.toggle('bad', Boolean(bad));
+    const box = $('status');
+    box.hidden = !msg;
+    box.textContent = msg || '';
+    box.classList.toggle('bad', Boolean(bad));
   }
 
   async function submitImport() {
@@ -224,10 +271,10 @@
       return;
     }
 
-    // A page may write only one thing, its plugin's options; the pool reads the
-    // import from there on its next load. Files are joined into one payload so
-    // one submission is one import.
-    const text = batches.length === 1 ? batches[0].text : `[${batches.map((b) => b.text.replace(/^\s*\[|\]\s*$/g, '')).join(',')}]`;
+    const text =
+      batches.length === 1
+        ? batches[0].text
+        : `[${batches.map((b) => b.text.replace(/^\s*\[|\]\s*$/g, '')).join(',')}]`;
     const name = batches.map((b) => b.name).join('+');
 
     try {
@@ -252,16 +299,47 @@
       }
     }
     $('importBtn').disabled = false;
-    setStatus('仍在等待：喜鹊下次加载插件时应用（点上方刷新可查看结果）', true);
+    setStatus('仍在等待：喜鹊下次加载插件时应用', true);
   }
 
   $('importBtn').addEventListener('click', submitImport);
+
+  // ---- tabs & controls ----------------------------------------------------
+  let saving = null;
+  function save() {
+    if (saving) return;
+    saving = setTimeout(async () => {
+      saving = null;
+      try {
+        opts = (await magpie.options.set({ ...opts, tab: state.tab, view: state.view, region: state.region, closed: [...state.closed] })) || opts;
+      } catch {}
+    }, 1100);
+  }
+
+  function paintTab() {
+    seg('tabs', 'tab', state.tab);
+    $('pane-accounts').hidden = state.tab !== 'accounts';
+    $('pane-usage').hidden = state.tab !== 'usage';
+    $('pane-routing').hidden = state.tab !== 'routing';
+    if (state.tab === 'accounts') paintGroups();
+    if (state.tab === 'usage') paintUsage();
+    if (state.tab === 'routing') paintRouting();
+  }
+
+  $('tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('button')?.dataset.tab;
+    if (!tab || tab === state.tab) return;
+    state.tab = tab;
+    paintTab();
+    save();
+  });
 
   $('views').addEventListener('click', (e) => {
     const v = e.target.closest('button')?.dataset.view;
     if (!v || v === state.view) return;
     state.view = v;
-    paint();
+    seg('views', 'view', v);
+    paintGroups();
     save();
   });
 
@@ -269,7 +347,8 @@
     const r = e.target.closest('button')?.dataset.region;
     if (!r || r === state.region) return;
     state.region = r;
-    paint();
+    seg('regions', 'region', r);
+    paintGroups();
     save();
   });
 
@@ -286,12 +365,20 @@
   magpie.onTheme?.((theme) => {
     if (theme?.lang) lang = theme.lang;
     words();
-    paint();
+    paintAll();
   });
 
-  // a pending import left by an earlier visit means the plugin has not run yet
+  function paintAll() {
+    if (snap) {
+      paintTiles();
+      seg('views', 'view', state.view);
+      seg('regions', 'region', state.region);
+    }
+    paintTab();
+  }
+
   if (opts?.pendingImport) setStatus('上次导入仍在等待喜鹊应用…');
 
   words();
-  paint();
+  paintAll();
 })();
