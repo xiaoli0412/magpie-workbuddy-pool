@@ -17,7 +17,7 @@
       lastImport: '最近导入',
       never: '未导入',
       search: '搜索号码 / uid / 来源文件',
-      health: { ok: '可用', bad: '失效', missing: '登录态缺失', error: '检测失败', unchecked: '待实测' },
+      health: { ok: '可用', bad: '失效', missing: '登录态缺失', error: '检测失败', unchecked: '待实测', disabled: '已关闭', cooldown: '冷却中' },
       importTitle: '导入账号',
       requests: '请求',
       input: '输入',
@@ -41,7 +41,7 @@
       lastImport: 'Last import',
       never: 'never',
       search: 'search number / uid / source file',
-      health: { ok: 'answers', bad: 'dead', missing: 'missing', error: 'check failed', unchecked: 'unchecked' },
+      health: { ok: 'answers', bad: 'dead', missing: 'missing', error: 'check failed', unchecked: 'unchecked', disabled: 'off', cooldown: 'cooling' },
       importTitle: 'Import',
       requests: 'Requests',
       input: 'Input',
@@ -94,10 +94,13 @@
       .some((v) => String(v).toLowerCase().includes(q));
   }
 
-  // levelOf folds the live verdict over the token's own clock: a check that has
-  // not run yet never outranks a token that has plainly ended.
+  // levelOf folds the live verdict, the lifecycle and the token's own clock
+  // into one answer: an account that is switched off or sitting out a cooldown
+  // is not "unknown", it is deliberately out of service.
   function levelOf(a) {
+    if (a.disabled) return 'disabled';
     if (!a.present) return 'missing';
+    if (a.cooldownUntil && a.cooldownUntil > Date.now()) return 'cooldown';
     if (a.health === 'bad' || a.health === 'missing') return 'bad';
     if (a.expiresAt && a.expiresAt <= Date.now()) return 'bad';
     if (a.health === 'error') return 'error';

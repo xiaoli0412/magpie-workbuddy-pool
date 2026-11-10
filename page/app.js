@@ -87,7 +87,28 @@
 
     const meta = el('div', 'meta' + (a.hoursLeft !== null && a.hoursLeft < 72 ? ' warn' : ''), V.left(a.expiresAt));
 
-    li.append(dot, who, meta);
+    // one row's own actions: test it, switch it off/on, remove it
+    const acts = el('div', 'racts');
+    const mk = (label, title, fn, cls) => {
+      const b = el('button', 'ract' + (cls ? ` ${cls}` : ''), label);
+      b.title = title;
+      b.type = 'button';
+      b.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        fn();
+      });
+      return b;
+    };
+    acts.append(
+      mk('测', '只检测这个账号（真发模型请求）', () => submitAction('test', [a.uid])),
+      mk(a.disabled ? '启' : '停', a.disabled ? '重新启用' : '停用（从喜鹊登录态移除，凭证留底）', () =>
+        submitAction(a.disabled ? 'enable' : 'disable', [a.uid]),
+      ),
+      mk('删', '从这个账号池删除', () => submitAction('delete', [a.uid]), 'danger'),
+    );
+
+    li.append(dot, who, meta, acts);
 
     if (detailed) {
       const kv = el('div', 'kv');
@@ -303,6 +324,72 @@
   }
 
   $('importBtn').addEventListener('click', submitImport);
+
+  // ---- actions ------------------------------------------------------------
+  // The page cannot touch the store or the network, so an action is written
+  // into the plugin's options and the page waits for the plugin to take it.
+  let acting = false;
+  async function submitAction(type, uids, extra = {}) {
+    if (acting) return;
+    acting = true;
+    note(`已提交：${ACTION_LABEL[type] ?? type}…`);
+    try {
+      opts = (await magpie.options.set({ ...opts, pendingAction: { type, uids, at: Date.now(), ...extra } })) || opts;
+    } catch (e) {
+      note(`提交失败：${e.message}`, true);
+      acting = false;
+      return;
+    }
+    // a test of many accounts takes minutes; the page reloads when the plugin
+    // has cleared the action, and refreshes itself to show the verdicts
+    for (let i = 0; i < 120; i++) {
+      await sleep(1500);
+      let now = null;
+      try {
+        now = await magpie.options.get();
+      } catch {}
+      if (now && !now.pendingAction) {
+        note('完成，正在刷新…');
+        location.reload();
+        return;
+      }
+    }
+    acting = false;
+    note('仍在执行：喜鹊下次加载插件时会继续', true);
+  }
+
+  const ACTION_LABEL = {
+    test: '检测',
+    delete: '删除',
+    enable: '启用',
+    disable: '停用',
+  };
+
+  function note(msg, bad) {
+    const box = $('actNote');
+    box.textContent = msg || '';
+    box.classList.toggle('bad', Boolean(bad));
+  }
+
+  $('testAll').addEventListener('click', () => submitAction('test', 'all'));
+  $('testShown').addEventListener('click', () => {
+    const rows = V.groups(snap, { query: state.query, region: state.region }).flatMap((g) => g.rows);
+    const uids = rows.map((a) => a.uid).filter(Boolean);
+    if (!uids.length) {
+      note('当前筛选下没有账号', true);
+      return;
+    }
+    submitAction('test', uids);
+  });
+  $('cleanDead').addEventListener('click', () => {
+    const dead = (snap?.accounts ?? []).filter((a) => V.levelOf(a) === 'bad' || a.disabled).map((a) => a.uid);
+    if (!dead.length) {
+      note('没有失效账号可以清理');
+      return;
+    }
+    if (!confirm(`清理 ${dead.length} 个失效/已关闭账号？它们会从账号池移除。`)) return;
+    submitAction('delete', dead);
+  });
 
   // ---- tabs & controls ----------------------------------------------------
   let saving = null;

@@ -11,7 +11,7 @@
 //
 // The work itself lives in lib/importer.mjs, which the plugin uses too, so the
 // command line and the page cannot drift apart.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AUTH_FILE, POOL_DIR, STATE_FILE } from '../lib/pools.mjs';
 import { loadPools } from '../lib/pools.mjs';
@@ -31,6 +31,7 @@ const dir = option('dir', POOL_DIR);
 const dry = flag('dry');
 const probeLive = !flag('no-probe') && !flag('offline');
 const asJson = flag('json');
+const scanFile = option('scan', join(dir, 'scan-result.json'));
 const say = (...a) => {
   if (!asJson) console.log(...a);
 };
@@ -44,17 +45,38 @@ if (!existsSync(dir)) {
 
 const { files, records, problems } = loadPools(dir);
 
+// A scan of the same folder says which accounts answer and which do not, so the
+// import does not have to probe every token again — and the pool starts out
+// knowing its own health.
+let scanResults = [];
+if (existsSync(scanFile)) {
+  try {
+    const parsed = JSON.parse(readFileSync(scanFile, 'utf8'));
+    scanResults = parsed.accounts ?? [];
+  } catch {
+    scanResults = [];
+  }
+}
+const scannedOk = scanResults.filter((r) => r.ok).length;
+const alive = scanResults.length ? new Set(scanResults.filter((r) => r.ok).map((r) => r.uid)) : null;
+
 say(`pool: ${dir}`);
 say(`files: ${files.length}${files.length ? ` (${files.map((f) => f.split(/[\\/]/).pop()).join(', ')})` : ''}`);
 for (const p of problems) say(`  skipped ${p.file}: ${p.error}`);
 say(`accounts read: ${records.length}`);
+if (scanResults.length) say(`scan: ${scanResults.length} 条记录，其中 ${scannedOk} 个可用（导入时按其结果落库）`);
 
-if (!records.length) {
+// Importing a scanned pool only brings in the ones that answered: a dead
+// token is not something to put in magpie's own store.
+const pool_records = alive ? records.filter((r) => alive.has(r.uid)) : records;
+if (alive) say(`导入可用账号: ${pool_records.length} / ${records.length}`);
+
+if (!pool_records.length) {
   console.error('nothing to import.');
   process.exit(1);
 }
 
-const report = await importRecords({ records, fileName: '', authFile: AUTH_FILE, stateFile: STATE_FILE, dry, probeLive });
+const report = await importRecords({ records: pool_records, fileName: '', authFile: AUTH_FILE, stateFile: STATE_FILE, dry, probeLive, scanResults, poolDir: dir });
 
 // A dry run still leaves the page's snapshot alone: it would claim numbers that
 // were never written.
@@ -121,3 +143,5 @@ say(
 );
 if (report.dropped.length) say(`清理：${report.dropped.length} 个本池已不存在的账号 → ${report.dropped.join(', ')}`);
 say(`快照：page/data.js${dry ? '（dry run，未写）' : ''}`);
+
+

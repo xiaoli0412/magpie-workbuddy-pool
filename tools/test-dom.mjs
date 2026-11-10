@@ -168,7 +168,7 @@ const rows = [];
 ok(byId.get('title').textContent === 'WorkBuddy 账号池', `title painted: "${byId.get('title').textContent}"`);
 ok(byId.get('tiles').children.length === 4, `four tiles, got ${byId.get('tiles').children.length}`);
 ok(groups.children.length === 2, `two region groups, got ${groups.children.length}`);
-ok(rows.length === 10, `ten account rows, got ${rows.length}`);
+ok(rows.length === globalThis.WB_POOL.accounts.length, `rows ${rows.length} vs ${globalThis.WB_POOL.accounts.length}`);
 ok(byId.get('empty').hidden === true, 'the empty note stays hidden when there are rows');
 ok(byId.get('error').hidden === true, 'no error is shown');
 
@@ -204,7 +204,7 @@ for (const fn of tabs.listeners.click || []) fn({ target: { closest: () => ({ da
 await new Promise((r) => setTimeout(r, 40));
 ok(byId.get('pane-usage').hidden === false, 'usage tab is shown');
 ok(byId.get('usageTiles').children.length === 4, `usage tiles: ${byId.get('usageTiles').children.length}`);
-ok(byId.get('usageAccounts').children.length === 10, `usage account rows: ${byId.get('usageAccounts').children.length}`);
+ok(byId.get('usageAccounts').children.length === globalThis.WB_POOL.accounts.length, 'usage rows match');
 
 for (const fn of tabs.listeners.click || []) fn({ target: { closest: () => ({ dataset: { tab: 'routing' } }) } });
 await new Promise((r) => setTimeout(r, 40));

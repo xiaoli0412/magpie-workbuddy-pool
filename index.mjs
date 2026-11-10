@@ -23,8 +23,10 @@ import { renew } from './lib/wb.mjs';
 import { ask } from './lib/health.mjs';
 import { collect, writeSnapshot, MARK } from './lib/snapshot.mjs';
 import { importRecords, recordsFromText, recordsFromFile, sweepHealth } from './lib/importer.mjs';
-import { pendingOf, clearPending, isStage } from './lib/options.mjs';
+import { pendingOf, clearPending, isStage, pendingActionOf, clearAction, isAction } from './lib/options.mjs';
 import { readUsage, summarise, routingOf, byDay } from './lib/usage.mjs';
+import { applyResult, dueForTest, isUsable, whyNot } from './lib/lifecycle.mjs';
+import { runAction } from './lib/actions.mjs';
 
 const LOCK = join(POOL_DIR, '.work.lock');
 const THROTTLE = join(POOL_DIR, '.work.json');
@@ -38,6 +40,51 @@ const HEALTH_EVERY_MS = 3 * 36e5;
 const LOCK_STALE_MS = 5 * 60e3;
 
 const log = (...a) => console.log('[workbuddy-pool]', ...a);
+
+// Set from the plugin's options on each load. 0 means "no limit", which is the
+// default: the pool is the user's, and silently switching accounts off would be
+// worse than a slow first load.
+let MAX_ACTIVE = 0;
+
+// trimToMax takes the accounts that are not answering best out of the pool when
+// a user has asked for a cap. It is deliberately conservative: only accounts
+// that have failed are candidates, and it never touches a healthy one.
+function trimToMax(state) {
+  if (!MAX_ACTIVE || MAX_ACTIVE <= 0) return 0;
+  const rows = Object.entries(state.accounts).filter(([, m]) => !m.disabled);
+  if (rows.length <= MAX_ACTIVE) return 0;
+
+  const rank = ([, m]) => {
+    // healthy and recently used first; broken ones sink
+    const health = m.health === 'ok' ? 0 : m.health === 'bad' ? 2 : 1;
+    return health * 1e12 - (m.checkedAt ?? 0);
+  };
+  rows.sort((a, b) => rank(a) - rank(b));
+
+  const victims = rows.slice(MAX_ACTIVE).filter(([, m]) => m.health !== 'ok');
+  if (!victims.length) return 0;
+
+  // taken out of magpie's store, credential kept aside so it can come back
+  let data;
+  let store;
+  try {
+    ({ data, store } = readAuth(AUTH_FILE));
+  } catch {
+    return 0;
+  }
+  state.disabledAuth ??= {};
+  for (const [key, meta] of victims) {
+    if (store[key]) {
+      state.disabledAuth[key] = store[key];
+      delete store[key];
+    }
+    meta.disabled = true;
+    meta.health = 'disabled';
+    meta.healthNote = `超出活跃上限 ${MAX_ACTIVE}`;
+  }
+  writeAuth(AUTH_FILE, data);
+  return victims.length;
+}
 
 function takeLock() {
   try {
@@ -79,7 +126,7 @@ async function applyPending() {
     clearPending();
     return { error };
   }
-  const report = await importRecords({ records, fileName: stage.name || '', authFile: AUTH_FILE, stateFile: STATE_FILE });
+  const report = await importRecords({ records, fileName: stage.name || '', authFile: AUTH_FILE, stateFile: STATE_FILE, poolDir: 'page' });
   clearPending();
   const summary = {
     at: Date.now(),
@@ -93,50 +140,83 @@ async function applyPending() {
   return summary;
 }
 
-// healthOnce asks every live account's model to answer, one at a time in small
-// groups so a pool of fifty does not open fifty streams at once.
+// applyAction carries out what the page asked for (test, delete, on, off).
+// It is a file write plus, for a test, real requests — so it runs before the
+// plugin answers only when the user is plainly waiting for it.
+async function applyAction() {
+  const action = pendingActionOf();
+  if (!isAction(action)) return null;
+  try {
+    const result = await runAction(action);
+    clearAction();
+    atomicJson(join(POOL_DIR, 'last-action.json'), { at: Date.now(), action, result });
+    log(`action ${action.type}: ${JSON.stringify(result)}`);
+    return result;
+  } catch (e) {
+    log(`action ${action.type} failed: ${e?.message ?? e}`);
+    clearAction();
+    return { error: String(e?.message ?? e) };
+  }
+}
+
+// healthOnce re-tests what is due: healthy accounts slowly, broken ones on
+// their cooldown boundary, with one cheap model each so a periodic sweep stays
+// cheap. A manual test from the page is the one that checks several models.
 async function healthOnce(state, concurrency = 3) {
   const managed = state.accounts;
   const { store } = readAuth(AUTH_FILE);
-  const keys = Object.keys(managed);
   const now = Date.now();
+
+  const due = Object.keys(managed).filter((key) => {
+    const meta = managed[key];
+    const life = {
+      health: meta.health,
+      failStreak: meta.failStreak,
+      cooldownUntil: meta.cooldownUntil,
+      disabled: meta.disabled,
+      lastTestAt: meta.checkedAt,
+    };
+    return dueForTest(life, { now });
+  });
+
   let asked = 0;
   let alive = 0;
   let cursor = 0;
 
   const worker = async () => {
-    while (cursor < keys.length) {
-      const key = keys[cursor++];
+    while (cursor < due.length) {
+      const key = due[cursor++];
       const meta = managed[key];
       const entry = store[key]?.auth ?? store[key];
       if (!entry?.access) {
-        meta.health = 'missing';
-        meta.healthNote = '登录态缺失';
-        meta.checkedAt = now;
-        continue;
-      }
-      // an expired token has nothing to prove; asking would only cost a round trip
-      if (entry.expires && entry.expires <= now) {
-        meta.health = 'bad';
-        meta.healthNote = 'access token 已过期';
-        meta.checkedAt = now;
+        Object.assign(meta, { health: 'missing', healthNote: '登录态缺失', checkedAt: now, disabled: true, failStreak: 3 });
         continue;
       }
       asked++;
       const r = await ask(meta.provider, entry);
-      meta.health = r.ok ? 'ok' : 'bad';
-      meta.healthNote = r.ok ? '' : r.error;
+      const life = applyResult(
+        { health: meta.health, failStreak: meta.failStreak, okStreak: meta.okStreak, cooldownUntil: meta.cooldownUntil, disabled: meta.disabled, lastTestAt: meta.checkedAt },
+        { ok: r.ok, error: r.error, status: r.status },
+        Date.now(),
+      );
+      meta.health = life.health;
+      meta.failStreak = life.failStreak;
+      meta.okStreak = life.okStreak;
+      meta.cooldownUntil = life.cooldownUntil;
+      meta.disabled = life.disabled;
+      meta.checkedAt = life.lastTestAt;
+      meta.healthNote = life.lastTestError;
+      meta.lastKind = life.lastKind;
       meta.healthModel = r.model;
       meta.healthMs = r.ms;
-      meta.checkedAt = Date.now();
       if (r.ok) alive++;
     }
   };
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, keys.length || 1) }, worker));
+  await Promise.all(Array.from({ length: Math.min(concurrency, due.length || 1) }, worker));
   atomicJson(STATE_FILE, state);
-  log(`asked ${asked} account(s), ${alive} answered`);
-  return { asked, alive };
+  if (asked) log(`swept ${asked} account(s), ${alive} answered`);
+  return { asked, alive, due: due.length };
 }
 
 // renewOnce spends the refresh token of anything close to ending.
@@ -225,6 +305,11 @@ async function background() {
     }
 
     atomicJson(THROTTLE, last);
+
+    // an optional cap: the user's own ceiling on how many accounts magpie has
+    // to load, since each one costs a model-list request at startup
+    const trimmed = trimToMax(stateNow());
+    if (trimmed) log(`trimmed ${trimmed} account(s) beyond the active limit of ${MAX_ACTIVE}`);
   } finally {
     dropLock();
   }
@@ -260,6 +345,8 @@ export function snapshot() {
 // workbuddyPool is magpie's entry point: async (input, options) => hooks.
 // It returns no hooks at all — the accounts are already the provider's.
 export const workbuddyPool = async (input, options) => {
+  MAX_ACTIVE = Number(options?.maxActive) > 0 ? Number(options.maxActive) : 0;
+
   // 1. work the page left for us, which is a file write and must land now
   try {
     await applyPending();
@@ -267,14 +354,35 @@ export const workbuddyPool = async (input, options) => {
     log(`import: ${e?.message ?? e}`);
   }
 
-  // 2. the page's data from local files: fast, and always current on open
+  // 2. an action the page asked for. A test of many accounts takes minutes, so
+  //    it is answered in the background; everything else is instant and lands
+  //    before this returns.
+  try {
+    const action = pendingActionOf();
+    if (isAction(action)) {
+      if (action.type === 'test') {
+        clearAction();
+        setTimeout(() => {
+          runAction(action)
+            .then(() => writeSnapshot(snapshot()))
+            .catch((e) => log(`test action: ${e?.message ?? e}`));
+        }, 0).unref?.();
+      } else {
+        await applyAction();
+      }
+    }
+  } catch (e) {
+    log(`action: ${e?.message ?? e}`);
+  }
+
+  // 3. the page's data from local files: fast, and always current on open
   try {
     writeSnapshot(snapshot());
   } catch (e) {
     log(`snapshot: ${e?.message ?? e}`);
   }
 
-  // 3. anything that talks to WorkBuddy happens after this returns
+  // 4. anything that talks to WorkBuddy happens after this returns
   setTimeout(() => {
     background().catch((e) => log(`background: ${e?.message ?? e}`));
   }, 0).unref?.();
@@ -286,3 +394,4 @@ export default workbuddyPool;
 
 // For the CLI and the tests; magpie never calls these.
 export const _internal = { applyPending, healthOnce, renewOnce, snapshot, RENEW_WITHIN_MS, HEALTH_EVERY_MS };
+
